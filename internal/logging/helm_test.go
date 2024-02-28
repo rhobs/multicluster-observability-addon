@@ -3,6 +3,7 @@ package logging
 import (
 	"testing"
 
+	logrtesting "github.com/go-logr/logr/testing"
 	loggingv1 "github.com/openshift/cluster-logging-operator/apis/logging/v1"
 	"github.com/rhobs/multicluster-observability-addon/internal/addon"
 	"github.com/rhobs/multicluster-observability-addon/internal/logging/handlers"
@@ -15,7 +16,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 	"open-cluster-management.io/addon-framework/pkg/addonfactory"
 	"open-cluster-management.io/addon-framework/pkg/addonmanager/addontesting"
@@ -33,17 +33,18 @@ var (
 	_ = operatorsv1alpha1.AddToScheme(scheme.Scheme)
 )
 
-func fakeGetValues(k8s client.Client) addonfactory.GetValuesFunc {
+func fakeGetValues(t *testing.T, k8s client.Client) addonfactory.GetValuesFunc {
 	return func(
 		cluster *clusterv1.ManagedCluster,
 		addon *addonapiv1alpha1.ManagedClusterAddOn,
 	) (addonfactory.Values, error) {
-		opts, err := handlers.BuildOptions(k8s, addon, nil)
+		logger := logrtesting.NewTestLogger(t)
+		opts, err := handlers.BuildOptions(k8s, logger, addon, nil)
 		if err != nil {
 			return nil, err
 		}
 
-		logging, err := manifests.BuildValues(opts)
+		logging, err := manifests.BuildValues(logger, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -220,13 +221,11 @@ func Test_Logging_AllConfigsTogether_AllResources(t *testing.T) {
 
 	// Wire everything together to a fake addon instance
 	loggingAgentAddon, err := addonfactory.NewAgentAddonFactory(addon.Name, addon.FS, addon.LoggingChartDir).
-		WithGetValuesFuncs(addonConfigValuesFn, fakeGetValues(fakeKubeClient)).
+		WithGetValuesFuncs(addonConfigValuesFn, fakeGetValues(t, fakeKubeClient)).
 		WithAgentRegistrationOption(&agent.RegistrationOption{}).
 		WithScheme(scheme.Scheme).
 		BuildHelmAgentAddon()
-	if err != nil {
-		klog.Fatalf("failed to build agent %v", err)
-	}
+	require.NoError(t, err)
 
 	// Render manifests and return them as k8s runtime objects
 	objects, err := loggingAgentAddon.Manifests(managedCluster, managedClusterAddOn)
